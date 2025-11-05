@@ -93,7 +93,7 @@ function captureFrame(videoElement, canvas) {
   canvas.width = videoElement.videoWidth;
   canvas.height = videoElement.videoHeight;
   context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.95);
+  return canvas.toDataURL("image/jpeg", 0.98);
 }
 
 capturePhotoBtn.addEventListener("click", () => {
@@ -198,6 +198,13 @@ function validateForm() {
   const formValid = generalForm.reportValidity();
   if (!formValid) return false;
 
+  const codigoInput = generalForm.elements.codigo;
+  if (codigoInput && !codigoInput.value.trim()) {
+    alert("Ingresa el código del inmueble para continuar.");
+    codigoInput.focus();
+    return false;
+  }
+
   if (!photos.length) {
     alert("Captura al menos una fotografía del inventario.");
     return false;
@@ -233,9 +240,9 @@ async function generatePdf() {
     setGeneratingState(true);
 
     const formData = new FormData(generalForm);
-    const direccion = formData.get("direccion");
-    const asesor = formData.get("asesor");
-    const inquilino = formData.get("inquilino");
+    const codigo = formData.get("codigo").trim();
+    const asesor = formData.get("asesor").trim();
+    const inquilino = formData.get("inquilino").trim();
     const fechaActual = new Date();
     const fechaFormateada = fechaActual.toLocaleDateString("es-CO", {
       day: "2-digit",
@@ -243,12 +250,14 @@ async function generatePdf() {
       year: "numeric",
     });
 
+    const sanitizedCodigo = codigo.replace(/\s+/g, "_");
     const sanitizedInquilino = inquilino.replace(/\s+/g, "_");
-    const fileName = `inventario_${sanitizedInquilino}.pdf`;
+    const fileNameParts = ["inventario", sanitizedCodigo || null, sanitizedInquilino || null].filter(Boolean);
+    const fileName = `${fileNameParts.join("_")}.pdf`;
     const signatureData = signatureCanvas.toDataURL("image/png");
 
     const pdfBlob = await buildInventoryPdf({
-      direccion,
+      codigo,
       asesor,
       inquilino,
       fechaFormateada,
@@ -259,7 +268,7 @@ async function generatePdf() {
     });
 
     downloadBlob(pdfBlob, fileName);
-    await sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fechaFormateada);
+    await sharePdfWithWhatsApp(pdfBlob, fileName, codigo, fechaFormateada);
   } catch (error) {
     console.error("Error al generar el PDF", error);
     alert("Ocurrió un error al generar el PDF. Por favor intenta nuevamente.");
@@ -275,8 +284,8 @@ window.addEventListener("beforeunload", () => {
   stopStream(selfieStream, selfieVideo);
 });
 
-async function sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fecha) {
-  const messageBase = `Inventario del inmueble ${direccion} realizado el ${fecha}. Se adjunta el PDF.`;
+async function sharePdfWithWhatsApp(pdfBlob, fileName, codigo, fecha) {
+  const messageBase = `Inventario del inmueble código ${codigo} realizado el ${fecha}. Se adjunta el PDF.`;
 
   for (const recipient of WHATSAPP_RECIPIENTS) {
     try {
@@ -292,7 +301,7 @@ async function sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fecha) {
           await navigator.share({
             files: [pdfFile],
             text: message,
-            title: `Inventario ${direccion}`,
+            title: `Inventario ${codigo}`,
           });
           shared = true;
         } catch (error) {
@@ -332,7 +341,7 @@ function downloadBlob(blob, fileName) {
 }
 
 async function buildInventoryPdf({
-  direccion,
+  codigo,
   asesor,
   inquilino,
   fechaFormateada,
@@ -343,7 +352,7 @@ async function buildInventoryPdf({
 }) {
   const pageWidth = 612;
   const pageHeight = 792;
-  const scale = 3;
+  const scale = 4;
   const margin = 40;
   const photoChunkSize = 2;
 
@@ -361,7 +370,7 @@ async function buildInventoryPdf({
   const { canvas, ctx } = createPageCanvas(pageWidth, pageHeight, scale);
   await drawHeader(ctx, margin, {
     pageWidth,
-    direccion,
+    codigo,
     asesor,
     inquilino,
     fechaFormateada,
@@ -384,7 +393,7 @@ async function buildInventoryPdf({
       pageHeight,
       scale
     );
-    await drawContinuationHeader(photoCtx, margin, index + 2, pageWidth);
+    await drawContinuationHeader(photoCtx, margin, index + 2, pageWidth, codigo);
     await drawPhotoGrid(photoCtx, group, {
       pageWidth,
       pageHeight,
@@ -406,6 +415,7 @@ async function buildInventoryPdf({
     fechaFormateada,
     signatureData,
     selfieImage,
+    codigo,
   });
   pages.push(canvasToPage(signatureCanvasPage));
 
@@ -422,11 +432,13 @@ function createPageCanvas(pageWidth, pageHeight, scale) {
   ctx.scale(scale, scale);
   ctx.textBaseline = "top";
   ctx.fillStyle = "#111111";
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   return { canvas, ctx };
 }
 
 function canvasToPage(canvas) {
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+  const dataUrl = canvas.toDataURL("image/jpeg", 1);
   return {
     dataUrl,
     width: canvas.width,
@@ -437,7 +449,7 @@ function canvasToPage(canvas) {
 async function drawHeader(
   ctx,
   margin,
-  { pageWidth, direccion, asesor, inquilino, fechaFormateada }
+  { pageWidth, codigo, asesor, inquilino, fechaFormateada }
 ) {
   const headerHeight = 180;
   const boxWidth = pageWidth - margin * 2;
@@ -473,6 +485,21 @@ async function drawHeader(
   ctx.font = "700 32px 'Segoe UI', sans-serif";
   ctx.fillText("Inventario de entrega", textX, boxY + 82);
 
+  const badgeText = `Código: ${codigo}`;
+  ctx.font = "600 18px 'Segoe UI', sans-serif";
+  const badgePaddingX = 18;
+  const badgePaddingY = 10;
+  const badgeTextWidth = ctx.measureText(badgeText).width;
+  const badgeWidth = badgeTextWidth + badgePaddingX * 2;
+  const badgeHeight = 40;
+  const badgeX = boxX + boxWidth - badgeWidth - 32;
+  const badgeY = boxY + 42;
+  ctx.fillStyle = "#1f7ed0";
+  drawRoundedRect(ctx, badgeX, badgeY, badgeWidth, badgeHeight, 20);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(badgeText, badgeX + badgePaddingX, badgeY + badgePaddingY + 2);
+
   ctx.fillStyle = "#1f7ed0";
   ctx.fillRect(boxX + 26, boxY + headerHeight - 18, boxWidth - 52, 3);
 
@@ -481,14 +508,13 @@ async function drawHeader(
   const infoWidth = boxWidth - 52;
   ctx.fillStyle = "#0f172a";
   ctx.font = "600 16px 'Segoe UI', sans-serif";
-  wrapText(ctx, `Dirección: ${direccion}`, infoX, infoY, infoWidth, 22);
-  wrapText(ctx, `Asesor: ${asesor}`, infoX, infoY + 32, infoWidth, 22);
-  wrapText(ctx, `Inquilino/Recibe: ${inquilino}`, infoX, infoY + 64, infoWidth, 22);
+  wrapText(ctx, `Asesor: ${asesor}`, infoX, infoY, infoWidth, 22);
+  wrapText(ctx, `Inquilino/Recibe: ${inquilino}`, infoX, infoY + 32, infoWidth, 22);
   ctx.font = "500 16px 'Segoe UI', sans-serif";
-  ctx.fillText(`Fecha: ${fechaFormateada}`, infoX, infoY + 96);
+  ctx.fillText(`Fecha: ${fechaFormateada}`, infoX, infoY + 72);
 }
 
-async function drawContinuationHeader(ctx, margin, pageNumber, pageWidth) {
+async function drawContinuationHeader(ctx, margin, pageNumber, pageWidth, codigo) {
   const headerHeight = 110;
   const boxWidth = pageWidth - margin * 2;
   const boxX = margin;
@@ -518,6 +544,15 @@ async function drawContinuationHeader(ctx, margin, pageNumber, pageWidth) {
   ctx.fillText(`Inventario fotográfico`, boxX + 24 + logoWidth + 24, boxY + 36);
   ctx.font = "500 18px 'Segoe UI', sans-serif";
   ctx.fillText(`Página ${pageNumber}`, boxX + 24 + logoWidth + 24, boxY + 68);
+  if (codigo) {
+    const codeText = `Código: ${codigo}`;
+    ctx.font = "600 16px 'Segoe UI', sans-serif";
+    const textWidth = ctx.measureText(codeText).width;
+    const textX = boxX + boxWidth - textWidth - 36;
+    ctx.fillStyle = "#1f7ed0";
+    ctx.fillText(codeText, textX, boxY + 68);
+    ctx.fillStyle = "#0f172a";
+  }
 }
 
 async function drawPhotoGrid(
@@ -554,6 +589,8 @@ async function drawPhotoGrid(
     const drawHeight = image.height * ratio;
     const imageX = x + padding + (availableWidth - drawWidth) / 2;
     const imageY = y + padding + (availableHeight - drawHeight) / 2;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, imageX, imageY, drawWidth, drawHeight);
 
     ctx.fillStyle = "#0b3d77";
@@ -569,6 +606,7 @@ async function drawSignaturePage(ctx, {
   fechaFormateada,
   signatureData,
   selfieImage,
+  codigo,
 }) {
   const contentWidth = pageWidth - margin * 2;
   const headerY = margin;
@@ -583,25 +621,31 @@ async function drawSignaturePage(ctx, {
 
   const infoBoxY = headerY + 56;
   ctx.fillStyle = "#eef4ff";
-  drawRoundedRect(ctx, margin, infoBoxY, contentWidth, 72, 16);
+  drawRoundedRect(ctx, margin, infoBoxY, contentWidth, 104, 16);
   ctx.fill();
   ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-  drawRoundedRect(ctx, margin + 4, infoBoxY + 4, contentWidth - 8, 64, 14);
+  drawRoundedRect(ctx, margin + 4, infoBoxY + 4, contentWidth - 8, 96, 14);
   ctx.fill();
 
   const nombreFirmante = firmante || "Sin registrar";
   ctx.fillStyle = "#0f172a";
   ctx.font = "600 18px 'Segoe UI', sans-serif";
-  ctx.fillText(`Nombre del firmante: ${nombreFirmante}`, margin + 18, infoBoxY + 30);
+  ctx.fillText(`Nombre del firmante: ${nombreFirmante}`, margin + 18, infoBoxY + 18);
   ctx.font = "500 18px 'Segoe UI', sans-serif";
-  ctx.fillText(`Fecha de entrega: ${fechaFormateada}`, margin + 18, infoBoxY + 58);
+  ctx.fillText(`Fecha de entrega: ${fechaFormateada}`, margin + 18, infoBoxY + 46);
+  if (codigo) {
+    ctx.font = "500 18px 'Segoe UI', sans-serif";
+    ctx.fillStyle = "#1f7ed0";
+    ctx.fillText(`Inventario código: ${codigo}`, margin + 18, infoBoxY + 74);
+    ctx.fillStyle = "#0f172a";
+  }
 
   const signatureImg = await loadImage(signatureData);
   const selfieImg = await loadImage(selfieImage);
 
   const signatureBox = {
     x: margin,
-    y: infoBoxY + 96,
+    y: infoBoxY + 104,
     width: contentWidth,
     height: 240,
   };
@@ -632,6 +676,8 @@ function drawLabeledImage(ctx, image, box, label) {
   const drawHeight = image.height * ratio;
   const imageX = box.x + padding + (availableWidth - drawWidth) / 2;
   const imageY = box.y + padding + (availableHeight - drawHeight) / 2;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(image, imageX, imageY, drawWidth, drawHeight);
 
   ctx.fillStyle = "#0b3d77";
