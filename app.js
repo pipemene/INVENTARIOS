@@ -219,13 +219,6 @@ async function generatePdf() {
   if (isGeneratingPdf) return;
   if (!validateForm()) return;
 
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    alert(
-      "No se pudo cargar la librería para crear el PDF. Verifica tu conexión a internet e intenta nuevamente."
-    );
-    return;
-  }
-
   try {
     setGeneratingState(true);
 
@@ -239,72 +232,23 @@ async function generatePdf() {
       month: "2-digit",
       year: "numeric",
     });
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
-
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(18);
-    pdf.text("Inventario de entrega", 40, 60);
-
-    pdf.setFontSize(12);
-    pdf.setFont("helvetica", "normal");
-    pdf.text(`Dirección: ${direccion}`, 40, 90);
-    pdf.text(`Asesor: ${asesor}`, 40, 110);
-    pdf.text(`Inquilino/Recibe: ${inquilino}`, 40, 130);
-    pdf.text(`Fecha: ${fechaFormateada}`, 40, 150);
-
-    pdf.setFont("helvetica", "bold");
-    pdf.text("Inventario fotográfico", 40, 190);
-
-    const photoWidth = 220;
-    const photoHeight = 160;
-    const photosPerRow = 2;
-    const rowSpacing = 40;
-    const marginTop = 210;
-    const marginLeft = 40;
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    let currentY = marginTop;
-    let itemsInRow = 0;
-
-    pdf.setFont("helvetica", "normal");
-
-    photos.forEach((photo, index) => {
-      if (itemsInRow === photosPerRow) {
-        itemsInRow = 0;
-        currentY += photoHeight + rowSpacing;
-      }
-
-      if (currentY + photoHeight > pageHeight - 160) {
-        pdf.addPage();
-        pdf.setFont("helvetica", "normal");
-        currentY = 60;
-        itemsInRow = 0;
-      }
-
-      const xPos = marginLeft + itemsInRow * (photoWidth + 20);
-      pdf.addImage(photo, "JPEG", xPos, currentY, photoWidth, photoHeight);
-      pdf.text(`Foto ${index + 1}`, xPos, currentY + photoHeight + 15);
-
-      itemsInRow += 1;
-    });
-
-    pdf.addPage();
-    pdf.setFont("helvetica", "bold");
-    pdf.text("Firma y selfie de verificación", 40, 80);
-
-    const signatureData = signatureCanvas.toDataURL("image/png");
-    pdf.setFont("helvetica", "normal");
-    pdf.text(`Nombre del firmante: ${firmaNombre.value}`, 40, 110);
-    pdf.text("Firma:", 40, 140);
-    pdf.addImage(signatureData, "PNG", 40, 150, 300, 120);
-
-    pdf.text("Selfie de verificación:", 40, 300);
-    pdf.addImage(selfieImage, "JPEG", 40, 310, 220, 180);
 
     const sanitizedInquilino = inquilino.replace(/\s+/g, "_");
     const fileName = `inventario_${sanitizedInquilino}.pdf`;
-    const pdfBlob = pdf.output("blob");
-    pdf.save(fileName);
+    const signatureData = signatureCanvas.toDataURL("image/png");
+
+    const pdfBlob = await buildInventoryPdf({
+      direccion,
+      asesor,
+      inquilino,
+      fechaFormateada,
+      photos,
+      signatureData,
+      selfieImage,
+      firmante: firmaNombre.value.trim(),
+    });
+
+    downloadBlob(pdfBlob, fileName);
     await sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fechaFormateada);
   } catch (error) {
     console.error("Error al generar el PDF", error);
@@ -360,4 +304,375 @@ async function sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fecha) {
       );
     }
   }
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+async function buildInventoryPdf({
+  direccion,
+  asesor,
+  inquilino,
+  fechaFormateada,
+  photos,
+  signatureData,
+  selfieImage,
+  firmante,
+}) {
+  const pageWidth = 612;
+  const pageHeight = 792;
+  const scale = 2;
+  const margin = 40;
+  const photoChunkSize = 4;
+
+  if (!signatureData || !selfieImage) {
+    throw new Error("Faltan imágenes obligatorias para el PDF");
+  }
+
+  const chunks = [];
+  for (let i = 0; i < photos.length; i += photoChunkSize) {
+    chunks.push(photos.slice(i, i + photoChunkSize));
+  }
+
+  const pages = [];
+  const firstPagePhotos = chunks.shift() ?? [];
+  const { canvas, ctx } = createPageCanvas(pageWidth, pageHeight, scale);
+  drawHeader(ctx, margin, {
+    direccion,
+    asesor,
+    inquilino,
+    fechaFormateada,
+  });
+  await drawPhotoGrid(ctx, firstPagePhotos, {
+    pageWidth,
+    margin,
+    startY: 220,
+    startIndex: 0,
+  });
+  pages.push(canvasToPage(canvas));
+
+  let processedPhotos = firstPagePhotos.length;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const group = chunks[index];
+    const { canvas: photoCanvas, ctx: photoCtx } = createPageCanvas(
+      pageWidth,
+      pageHeight,
+      scale
+    );
+    drawContinuationHeader(photoCtx, margin, index + 2);
+    await drawPhotoGrid(photoCtx, group, {
+      pageWidth,
+      margin,
+      startY: 120,
+      startIndex: processedPhotos,
+    });
+    pages.push(canvasToPage(photoCanvas));
+    processedPhotos += group.length;
+  }
+
+  const { canvas: signatureCanvasPage, ctx: signatureCtxPage } =
+    createPageCanvas(pageWidth, pageHeight, scale);
+  await drawSignaturePage(signatureCtxPage, {
+    margin,
+    pageWidth,
+    firmante,
+    fechaFormateada,
+    signatureData,
+    selfieImage,
+  });
+  pages.push(canvasToPage(signatureCanvasPage));
+
+  return createPdfFromImages(pages, pageWidth, pageHeight);
+}
+
+function createPageCanvas(pageWidth, pageHeight, scale) {
+  const canvas = document.createElement("canvas");
+  canvas.width = pageWidth * scale;
+  canvas.height = pageHeight * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(scale, scale);
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#111111";
+  return { canvas, ctx };
+}
+
+function canvasToPage(canvas) {
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.86);
+  return {
+    dataUrl,
+    width: canvas.width,
+    height: canvas.height,
+  };
+}
+
+function drawHeader(ctx, margin, { direccion, asesor, inquilino, fechaFormateada }) {
+  ctx.fillStyle = "#111111";
+  ctx.font = "700 26px 'Segoe UI', sans-serif";
+  ctx.fillText("Inventario de entrega", margin, margin);
+
+  ctx.font = "16px 'Segoe UI', sans-serif";
+  const infoY = margin + 50;
+  wrapText(ctx, `Dirección: ${direccion}`, margin, infoY, 532, 22);
+  wrapText(ctx, `Asesor: ${asesor}`, margin, infoY + 44, 532, 22);
+  wrapText(ctx, `Inquilino/Recibe: ${inquilino}`, margin, infoY + 88, 532, 22);
+  ctx.fillText(`Fecha: ${fechaFormateada}`, margin, infoY + 132);
+
+  ctx.font = "700 20px 'Segoe UI', sans-serif";
+  ctx.fillText("Inventario fotográfico", margin, infoY + 176);
+}
+
+function drawContinuationHeader(ctx, margin, pageNumber) {
+  ctx.fillStyle = "#111111";
+  ctx.font = "700 24px 'Segoe UI', sans-serif";
+  ctx.fillText(`Inventario fotográfico (página ${pageNumber})`, margin, margin);
+  ctx.font = "16px 'Segoe UI', sans-serif";
+  ctx.fillText("Continuación de fotografías", margin, margin + 32);
+}
+
+async function drawPhotoGrid(ctx, photosGroup, { pageWidth, margin, startY, startIndex }) {
+  if (!photosGroup.length) return;
+  const gap = 20;
+  const columns = 2;
+  const cellWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
+  const cellHeight = 220;
+  const labelHeight = 24;
+  const padding = 10;
+
+  const images = await Promise.all(photosGroup.map(loadImage));
+
+  images.forEach((image, idx) => {
+    const column = idx % columns;
+    const row = Math.floor(idx / columns);
+    const x = margin + column * (cellWidth + gap);
+    const y = startY + row * (cellHeight + gap);
+
+    ctx.fillStyle = "#f5f5f5";
+    ctx.fillRect(x, y, cellWidth, cellHeight);
+    ctx.strokeStyle = "#d0d0d0";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, cellWidth, cellHeight);
+
+    const availableWidth = cellWidth - padding * 2;
+    const availableHeight = cellHeight - padding * 2 - labelHeight;
+    const ratio = Math.min(
+      availableWidth / image.width,
+      availableHeight / image.height
+    );
+    const drawWidth = image.width * ratio;
+    const drawHeight = image.height * ratio;
+    const imageX = x + padding + (availableWidth - drawWidth) / 2;
+    const imageY = y + padding + (availableHeight - drawHeight) / 2;
+    ctx.drawImage(image, imageX, imageY, drawWidth, drawHeight);
+
+    ctx.fillStyle = "#111111";
+    ctx.font = "600 16px 'Segoe UI', sans-serif";
+    ctx.fillText(`Foto ${startIndex + idx + 1}`, x + padding, y + cellHeight - labelHeight);
+  });
+}
+
+async function drawSignaturePage(ctx, {
+  margin,
+  pageWidth,
+  firmante,
+  fechaFormateada,
+  signatureData,
+  selfieImage,
+}) {
+  ctx.fillStyle = "#111111";
+  ctx.font = "700 26px 'Segoe UI', sans-serif";
+  ctx.fillText("Firma y verificación", margin, margin);
+
+  ctx.font = "16px 'Segoe UI', sans-serif";
+  const nombreFirmante = firmante || "Sin registrar";
+  wrapText(ctx, `Nombre del firmante: ${nombreFirmante}`, margin, margin + 48, 532, 22);
+  ctx.fillText(`Fecha de entrega: ${fechaFormateada}`, margin, margin + 90);
+
+  const signatureImg = await loadImage(signatureData);
+  const selfieImg = await loadImage(selfieImage);
+
+  const signatureBox = {
+    x: margin,
+    y: margin + 130,
+    width: pageWidth - margin * 2,
+    height: 200,
+  };
+  const selfieBox = {
+    x: margin,
+    y: signatureBox.y + signatureBox.height + 60,
+    width: pageWidth - margin * 2,
+    height: 220,
+  };
+
+  drawLabeledImage(ctx, signatureImg, signatureBox, "Firma del inquilino");
+  drawLabeledImage(ctx, selfieImg, selfieBox, "Selfie de verificación");
+}
+
+function drawLabeledImage(ctx, image, box, label) {
+  ctx.fillStyle = "#f5f5f5";
+  ctx.fillRect(box.x, box.y, box.width, box.height);
+  ctx.strokeStyle = "#d0d0d0";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+  const padding = 16;
+  const availableWidth = box.width - padding * 2;
+  const availableHeight = box.height - padding * 2 - 28;
+  const ratio = Math.min(availableWidth / image.width, availableHeight / image.height);
+  const drawWidth = image.width * ratio;
+  const drawHeight = image.height * ratio;
+  const imageX = box.x + padding + (availableWidth - drawWidth) / 2;
+  const imageY = box.y + padding + (availableHeight - drawHeight) / 2;
+  ctx.drawImage(image, imageX, imageY, drawWidth, drawHeight);
+
+  ctx.fillStyle = "#111111";
+  ctx.font = "600 18px 'Segoe UI', sans-serif";
+  ctx.fillText(label, box.x + padding, box.y + box.height - 26);
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(" ");
+  let line = "";
+  let currentY = y;
+
+  words.forEach((word) => {
+    const testLine = line ? `${line} ${word}` : word;
+    const { width } = ctx.measureText(testLine);
+    if (width > maxWidth && line) {
+      ctx.fillText(line, x, currentY);
+      line = word;
+      currentY += lineHeight;
+    } else {
+      line = testLine;
+    }
+  });
+
+  if (line) {
+    ctx.fillText(line, x, currentY);
+  }
+}
+
+function loadImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("No se pudo cargar una de las imágenes"));
+    image.src = source;
+  });
+}
+
+function createPdfFromImages(pages, pageWidth, pageHeight) {
+  const encoder = new TextEncoder();
+  const parts = [];
+  const offsets = [];
+  let length = 0;
+
+  const pushUint8 = (array) => {
+    parts.push(array);
+    length += array.length;
+  };
+
+  const pushString = (value) => {
+    pushUint8(encoder.encode(value));
+  };
+
+  pushString("%PDF-1.3\n");
+
+  const catalogId = 1;
+  const pagesId = 2;
+  let nextId = 3;
+
+  const imageIds = [];
+  const contentIds = [];
+  const pageIds = [];
+
+  pages.forEach(() => {
+    const imageId = nextId++;
+    const contentId = nextId++;
+    const pageId = nextId++;
+    imageIds.push(imageId);
+    contentIds.push(contentId);
+    pageIds.push(pageId);
+  });
+
+  const totalObjects = nextId - 1;
+
+  const writeObject = (id, bodyParts) => {
+    offsets[id] = length;
+    pushString(`${id} 0 obj\n`);
+    bodyParts.forEach((part) => {
+      if (typeof part === "string") {
+        pushString(part);
+      } else {
+        pushUint8(part);
+      }
+    });
+    pushString("\nendobj\n");
+  };
+
+  writeObject(catalogId, [`<< /Type /Catalog /Pages ${pagesId} 0 R >>`]);
+
+  const kidsList = pageIds.map((id) => `${id} 0 R`).join(" ");
+  writeObject(pagesId, [`<< /Type /Pages /Count ${pages.length} /Kids [${kidsList}] >>`]);
+
+  pages.forEach((page, index) => {
+    const imageId = imageIds[index];
+    const contentId = contentIds[index];
+    const pageId = pageIds[index];
+    const imName = `/Im${index + 1}`;
+
+    const contentStream = `q ${pageWidth} 0 0 ${pageHeight} 0 0 cm ${imName} Do Q\n`;
+    const contentBytes = encoder.encode(contentStream);
+
+    writeObject(pageId, [
+      `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << ${imName} ${imageId} 0 R >> /ProcSet [/PDF /ImageC] >> /Contents ${contentId} 0 R >>`,
+    ]);
+
+    writeObject(contentId, [
+      `<< /Length ${contentBytes.length} >>\nstream\n`,
+      contentBytes,
+      "\nendstream",
+    ]);
+
+    const imageData = base64ToUint8Array(page.dataUrl.split(",")[1]);
+    writeObject(imageId, [
+      `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageData.length} >>\nstream\n`,
+      imageData,
+      "\nendstream",
+    ]);
+  });
+
+  const startXref = length;
+  pushString(`xref\n0 ${totalObjects + 1}\n`);
+  pushString("0000000000 65535 f \n");
+  for (let i = 1; i <= totalObjects; i += 1) {
+    const offset = offsets[i] ?? 0;
+    const offsetString = offset.toString().padStart(10, "0");
+    pushString(`${offsetString} 00000 n \n`);
+  }
+  pushString(
+    `trailer\n<< /Size ${totalObjects + 1} /Root ${catalogId} 0 R >>\nstartxref\n${startXref}\n%%EOF`
+  );
+
+  return new Blob(parts, { type: "application/pdf" });
+}
+
+function base64ToUint8Array(base64) {
+  const binary = atob(base64);
+  const length = binary.length;
+  const bytes = new Uint8Array(length);
+  for (let i = 0; i < length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }

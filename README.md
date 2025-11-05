@@ -24,3 +24,7 @@ Arrendamientos y Reparaciones.
 
 > **Nota:** El navegador solicitará permiso para usar la cámara. Asegúrate de
 > concederlo para poder tomar las fotos y la selfie.
+
+La generación del PDF se realiza completamente en el navegador sin depender de
+conexión a internet o bibliotecas externas, por lo que funcionará incluso en
+lugares con señal limitada.
