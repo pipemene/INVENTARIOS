@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inventario de entrega de inmueble</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <main class="layout">
+      <header>
+        <h1>Inventario fotográfico de entrega</h1>
+        <p>
+          Completa la información, toma las fotografías requeridas y genera el PDF
+          final para enviarlo por correo.
+        </p>
+      </header>
+
+      <section class="card">
+        <h2>Datos generales</h2>
+        <form id="general-form" class="form">
+          <label>
+            Dirección del inmueble
+            <input type="text" id="direccion" name="direccion" required />
+          </label>
+          <label>
+            Asesor responsable
+            <input type="text" id="asesor" name="asesor" required />
+          </label>
+          <label>
+            Inquilino/Recibe
+            <input type="text" id="inquilino" name="inquilino" required />
+          </label>
+          <label>
+            Fecha de entrega
+            <input type="date" id="fecha" name="fecha" required />
+            <span class="hint">Se completa automáticamente con la fecha del día.</span>
+          </label>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Inventario fotográfico</h2>
+        <div class="camera-group">
+          <video id="camera" autoplay playsinline></video>
+          <canvas id="photo-canvas" hidden></canvas>
+          <div class="camera-actions">
+            <button type="button" id="start-camera">Activar cámara</button>
+            <button type="button" id="capture-photo" disabled>Tomar foto</button>
+          </div>
+        </div>
+        <div>
+          <h3>Fotografías capturadas</h3>
+          <p class="hint">
+            Captura todas las fotografías necesarias. Puedes eliminar cualquier
+            imagen antes de generar el PDF.
+          </p>
+          <ul id="photo-list" class="photo-list"></ul>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Firma del inquilino</h2>
+        <p class="hint">
+          Solicita al inquilino escribir su nombre y firmar con el dedo sobre el
+          recuadro.
+        </p>
+        <label>
+          Nombre completo
+          <input type="text" id="firma-nombre" placeholder="Nombre del inquilino" required />
+        </label>
+        <div class="signature-pad" id="signature-pad">
+          <canvas id="signature-canvas" width="600" height="200"></canvas>
+          <button type="button" id="clear-signature">Borrar firma</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Selfie de verificación</h2>
+        <p class="hint">
+          Toma una selfie junto al inquilino para validar la entrega.
+        </p>
+        <div class="camera-group">
+          <video id="selfie-camera" autoplay playsinline></video>
+          <canvas id="selfie-canvas" hidden></canvas>
+          <div class="camera-actions">
+            <button type="button" id="start-selfie-camera">Activar cámara</button>
+            <button type="button" id="capture-selfie" disabled>Tomar selfie</button>
+          </div>
+        </div>
+        <div class="selfie-preview" id="selfie-preview"></div>
+      </section>
+
+      <section class="card actions">
+        <button type="button" id="generate-pdf" class="primary">Generar PDF</button>
+        <p class="hint">
+          El PDF final se descargará y se abrirán los chats de WhatsApp para
+          Arrendamientos y Reparaciones para compartirlo.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
