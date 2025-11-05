@@ -11,6 +11,30 @@ const selfiePreview = document.getElementById("selfie-preview");
 const generatePdfBtn = document.getElementById("generate-pdf");
 const firmaNombre = document.getElementById("firma-nombre");
 const generalForm = document.getElementById("general-form");
+const fechaInput = document.getElementById("fecha");
+
+const WHATSAPP_RECIPIENTS = [
+  { phone: "573178574053", label: "Arrendamientos" },
+  { phone: "57300294830", label: "Reparaciones" },
+];
+
+setTodayDate();
+
+function setTodayDate() {
+  const today = new Date();
+  const isoDate = today.toISOString().split("T")[0];
+  fechaInput.value = isoDate;
+  fechaInput.readOnly = true;
+  const preventChange = (event) => {
+    event.preventDefault();
+    fechaInput.blur();
+  };
+  ["keydown", "mousedown", "touchstart"].forEach((eventName) => {
+    fechaInput.addEventListener(eventName, preventChange, {
+      passive: false,
+    });
+  });
+}
 
 let cameraStream;
 let selfieStream;
@@ -190,7 +214,12 @@ async function generatePdf() {
   const direccion = formData.get("direccion");
   const asesor = formData.get("asesor");
   const inquilino = formData.get("inquilino");
-  const fecha = formData.get("fecha");
+  const fechaActual = new Date();
+  const fechaFormateada = fechaActual.toLocaleDateString("es-CO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
 
@@ -203,7 +232,7 @@ async function generatePdf() {
   pdf.text(`Dirección: ${direccion}`, 40, 90);
   pdf.text(`Asesor: ${asesor}`, 40, 110);
   pdf.text(`Inquilino/Recibe: ${inquilino}`, 40, 130);
-  pdf.text(`Fecha: ${fecha}`, 40, 150);
+  pdf.text(`Fecha: ${fechaFormateada}`, 40, 150);
 
   pdf.setFont("helvetica", "bold");
   pdf.text("Inventario fotográfico", 40, 190);
@@ -253,7 +282,11 @@ async function generatePdf() {
   pdf.text("Selfie de verificación:", 40, 300);
   pdf.addImage(selfieImage, "JPEG", 40, 310, 220, 180);
 
-  pdf.save(`inventario_${inquilino.replace(/\s+/g, "_")}.pdf`);
+  const sanitizedInquilino = inquilino.replace(/\s+/g, "_");
+  const fileName = `inventario_${sanitizedInquilino}.pdf`;
+  const pdfBlob = pdf.output("blob");
+  pdf.save(fileName);
+  await sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fechaFormateada);
 }
 
 generatePdfBtn.addEventListener("click", generatePdf);
@@ -262,3 +295,34 @@ window.addEventListener("beforeunload", () => {
   stopStream(cameraStream, cameraVideo);
   stopStream(selfieStream, selfieVideo);
 });
+
+async function sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fecha) {
+  const messageBase = `Inventario del inmueble ${direccion} realizado el ${fecha}. Se adjunta el PDF.`;
+
+  for (const recipient of WHATSAPP_RECIPIENTS) {
+    const pdfFile = new File([pdfBlob], fileName, { type: "application/pdf" });
+    const message = `${messageBase}\nDestinatario: ${recipient.label}`;
+
+    let shared = false;
+    if (navigator.canShare && navigator.canShare({ files: [pdfFile], text: message })) {
+      try {
+        await navigator.share({
+          files: [pdfFile],
+          text: message,
+          title: `Inventario ${direccion}`,
+        });
+        shared = true;
+      } catch (error) {
+        console.warn(`No se completó el uso compartido nativo para ${recipient.label}`, error);
+      }
+    }
+
+    if (!shared) {
+      const whatsappLink = `https://wa.me/${recipient.phone}?text=${encodeURIComponent(message)}`;
+      window.open(whatsappLink, "_blank");
+      alert(
+        `Se abrió el chat de WhatsApp para ${recipient.label}. Adjunta el archivo ${fileName} que se descargó automáticamente.`
+      );
+    }
+  }
+}
