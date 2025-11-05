@@ -207,86 +207,111 @@ function validateForm() {
   return true;
 }
 
+let isGeneratingPdf = false;
+
+function setGeneratingState(isLoading) {
+  isGeneratingPdf = isLoading;
+  generatePdfBtn.disabled = isLoading;
+  generatePdfBtn.textContent = isLoading ? "Generando PDF..." : "Generar PDF";
+}
+
 async function generatePdf() {
+  if (isGeneratingPdf) return;
   if (!validateForm()) return;
 
-  const formData = new FormData(generalForm);
-  const direccion = formData.get("direccion");
-  const asesor = formData.get("asesor");
-  const inquilino = formData.get("inquilino");
-  const fechaActual = new Date();
-  const fechaFormateada = fechaActual.toLocaleDateString("es-CO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-  const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert(
+      "No se pudo cargar la librería para crear el PDF. Verifica tu conexión a internet e intenta nuevamente."
+    );
+    return;
+  }
 
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(18);
-  pdf.text("Inventario de entrega", 40, 60);
+  try {
+    setGeneratingState(true);
 
-  pdf.setFontSize(12);
-  pdf.setFont("helvetica", "normal");
-  pdf.text(`Dirección: ${direccion}`, 40, 90);
-  pdf.text(`Asesor: ${asesor}`, 40, 110);
-  pdf.text(`Inquilino/Recibe: ${inquilino}`, 40, 130);
-  pdf.text(`Fecha: ${fechaFormateada}`, 40, 150);
+    const formData = new FormData(generalForm);
+    const direccion = formData.get("direccion");
+    const asesor = formData.get("asesor");
+    const inquilino = formData.get("inquilino");
+    const fechaActual = new Date();
+    const fechaFormateada = fechaActual.toLocaleDateString("es-CO", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
 
-  pdf.setFont("helvetica", "bold");
-  pdf.text("Inventario fotográfico", 40, 190);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(18);
+    pdf.text("Inventario de entrega", 40, 60);
 
-  const photoWidth = 220;
-  const photoHeight = 160;
-  const photosPerRow = 2;
-  const rowSpacing = 40;
-  const marginTop = 210;
-  const marginLeft = 40;
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  let currentY = marginTop;
-  let itemsInRow = 0;
+    pdf.setFontSize(12);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`Dirección: ${direccion}`, 40, 90);
+    pdf.text(`Asesor: ${asesor}`, 40, 110);
+    pdf.text(`Inquilino/Recibe: ${inquilino}`, 40, 130);
+    pdf.text(`Fecha: ${fechaFormateada}`, 40, 150);
 
-  pdf.setFont("helvetica", "normal");
+    pdf.setFont("helvetica", "bold");
+    pdf.text("Inventario fotográfico", 40, 190);
 
-  photos.forEach((photo, index) => {
-    if (itemsInRow === photosPerRow) {
-      itemsInRow = 0;
-      currentY += photoHeight + rowSpacing;
-    }
+    const photoWidth = 220;
+    const photoHeight = 160;
+    const photosPerRow = 2;
+    const rowSpacing = 40;
+    const marginTop = 210;
+    const marginLeft = 40;
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    let currentY = marginTop;
+    let itemsInRow = 0;
 
-    if (currentY + photoHeight > pageHeight - 160) {
-      pdf.addPage();
-      pdf.setFont("helvetica", "normal");
-      currentY = 60;
-      itemsInRow = 0;
-    }
+    pdf.setFont("helvetica", "normal");
 
-    const xPos = marginLeft + itemsInRow * (photoWidth + 20);
-    pdf.addImage(photo, "JPEG", xPos, currentY, photoWidth, photoHeight);
-    pdf.text(`Foto ${index + 1}`, xPos, currentY + photoHeight + 15);
+    photos.forEach((photo, index) => {
+      if (itemsInRow === photosPerRow) {
+        itemsInRow = 0;
+        currentY += photoHeight + rowSpacing;
+      }
 
-    itemsInRow += 1;
-  });
+      if (currentY + photoHeight > pageHeight - 160) {
+        pdf.addPage();
+        pdf.setFont("helvetica", "normal");
+        currentY = 60;
+        itemsInRow = 0;
+      }
 
-  pdf.addPage();
-  pdf.setFont("helvetica", "bold");
-  pdf.text("Firma y selfie de verificación", 40, 80);
+      const xPos = marginLeft + itemsInRow * (photoWidth + 20);
+      pdf.addImage(photo, "JPEG", xPos, currentY, photoWidth, photoHeight);
+      pdf.text(`Foto ${index + 1}`, xPos, currentY + photoHeight + 15);
 
-  const signatureData = signatureCanvas.toDataURL("image/png");
-  pdf.setFont("helvetica", "normal");
-  pdf.text(`Nombre del firmante: ${firmaNombre.value}`, 40, 110);
-  pdf.text("Firma:", 40, 140);
-  pdf.addImage(signatureData, "PNG", 40, 150, 300, 120);
+      itemsInRow += 1;
+    });
 
-  pdf.text("Selfie de verificación:", 40, 300);
-  pdf.addImage(selfieImage, "JPEG", 40, 310, 220, 180);
+    pdf.addPage();
+    pdf.setFont("helvetica", "bold");
+    pdf.text("Firma y selfie de verificación", 40, 80);
 
-  const sanitizedInquilino = inquilino.replace(/\s+/g, "_");
-  const fileName = `inventario_${sanitizedInquilino}.pdf`;
-  const pdfBlob = pdf.output("blob");
-  pdf.save(fileName);
-  await sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fechaFormateada);
+    const signatureData = signatureCanvas.toDataURL("image/png");
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`Nombre del firmante: ${firmaNombre.value}`, 40, 110);
+    pdf.text("Firma:", 40, 140);
+    pdf.addImage(signatureData, "PNG", 40, 150, 300, 120);
+
+    pdf.text("Selfie de verificación:", 40, 300);
+    pdf.addImage(selfieImage, "JPEG", 40, 310, 220, 180);
+
+    const sanitizedInquilino = inquilino.replace(/\s+/g, "_");
+    const fileName = `inventario_${sanitizedInquilino}.pdf`;
+    const pdfBlob = pdf.output("blob");
+    pdf.save(fileName);
+    await sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fechaFormateada);
+  } catch (error) {
+    console.error("Error al generar el PDF", error);
+    alert("Ocurrió un error al generar el PDF. Por favor intenta nuevamente.");
+  } finally {
+    setGeneratingState(false);
+  }
 }
 
 generatePdfBtn.addEventListener("click", generatePdf);
@@ -300,28 +325,38 @@ async function sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fecha) {
   const messageBase = `Inventario del inmueble ${direccion} realizado el ${fecha}. Se adjunta el PDF.`;
 
   for (const recipient of WHATSAPP_RECIPIENTS) {
-    const pdfFile = new File([pdfBlob], fileName, { type: "application/pdf" });
-    const message = `${messageBase}\nDestinatario: ${recipient.label}`;
+    try {
+      const pdfFile = new File([pdfBlob], fileName, { type: "application/pdf" });
+      const message = `${messageBase}\nDestinatario: ${recipient.label}`;
 
-    let shared = false;
-    if (navigator.canShare && navigator.canShare({ files: [pdfFile], text: message })) {
-      try {
-        await navigator.share({
-          files: [pdfFile],
-          text: message,
-          title: `Inventario ${direccion}`,
-        });
-        shared = true;
-      } catch (error) {
-        console.warn(`No se completó el uso compartido nativo para ${recipient.label}`, error);
+      let shared = false;
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile], text: message })) {
+        try {
+          await navigator.share({
+            files: [pdfFile],
+            text: message,
+            title: `Inventario ${direccion}`,
+          });
+          shared = true;
+        } catch (error) {
+          console.warn(`No se completó el uso compartido nativo para ${recipient.label}`, error);
+        }
       }
-    }
 
-    if (!shared) {
-      const whatsappLink = `https://wa.me/${recipient.phone}?text=${encodeURIComponent(message)}`;
-      window.open(whatsappLink, "_blank");
+      if (!shared) {
+        const whatsappLink = `https://wa.me/${recipient.phone}?text=${encodeURIComponent(message)}`;
+        const newWindow = window.open(whatsappLink, "_blank");
+        if (!newWindow) {
+          throw new Error("El navegador bloqueó la apertura de WhatsApp");
+        }
+        alert(
+          `Se abrió el chat de WhatsApp para ${recipient.label}. Adjunta el archivo ${fileName} que se descargó automáticamente.`
+        );
+      }
+    } catch (error) {
+      console.error(`No se pudo compartir el PDF con ${recipient.label}`, error);
       alert(
-        `Se abrió el chat de WhatsApp para ${recipient.label}. Adjunta el archivo ${fileName} que se descargó automáticamente.`
+        `No se pudo compartir automáticamente el PDF con ${recipient.label}. Busca el archivo ${fileName} en tus descargas y envíalo manualmente.`
       );
     }
   }
