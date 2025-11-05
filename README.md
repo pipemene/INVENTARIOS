@@ -18,9 +18,13 @@ Arrendamientos y Reparaciones.
 5. Activa la cámara frontal para capturar la selfie de verificación.
 6. Presiona **Generar PDF** para descargar el inventario. El sistema intentará
    compartir automáticamente el PDF por WhatsApp con Arrendamientos
-   (+57&nbsp;317&nbsp;857&nbsp;4053) y Reparaciones (+57&nbsp;300&nbsp;294&nbsp;830). Si el
-   dispositivo no soporta el uso compartido nativo, se abrirán los chats para
-   que adjuntes el archivo descargado manualmente.
+   (317&nbsp;857&nbsp;4053) y Reparaciones (300&nbsp;294&nbsp;830). Si el dispositivo no
+   soporta el uso compartido nativo, se abrirán los chats para que adjuntes el
+   archivo descargado manualmente.
+
+El PDF resultante coloca dos fotografías por página en alta resolución, con la
+imagen corporativa de Blue Home en cada hoja y un resumen claro de la firma y
+la selfie final.
 
 > **Nota:** El navegador solicitará permiso para usar la cámara. Asegúrate de
 > concederlo para poder tomar las fotos y la selfie.

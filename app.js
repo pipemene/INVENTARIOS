@@ -14,9 +14,19 @@ const generalForm = document.getElementById("general-form");
 const fechaInput = document.getElementById("fecha");
 
 const WHATSAPP_RECIPIENTS = [
-  { phone: "573178574053", label: "Arrendamientos" },
-  { phone: "57300294830", label: "Reparaciones" },
+  { phone: "3178574053", label: "Arrendamientos" },
+  { phone: "300294830", label: "Reparaciones" },
 ];
+
+const BLUE_HOME_LOGO_SRC = "assets/blue-home-logo.svg";
+let logoImagePromise;
+
+function getLogoImage() {
+  if (!logoImagePromise) {
+    logoImagePromise = loadImage(BLUE_HOME_LOGO_SRC);
+  }
+  return logoImagePromise;
+}
 
 setTodayDate();
 
@@ -83,7 +93,7 @@ function captureFrame(videoElement, canvas) {
   canvas.width = videoElement.videoWidth;
   canvas.height = videoElement.videoHeight;
   context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.9);
+  return canvas.toDataURL("image/jpeg", 0.95);
 }
 
 capturePhotoBtn.addEventListener("click", () => {
@@ -272,6 +282,9 @@ async function sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fecha) {
     try {
       const pdfFile = new File([pdfBlob], fileName, { type: "application/pdf" });
       const message = `${messageBase}\nDestinatario: ${recipient.label}`;
+      const whatsappNumber = recipient.phone.startsWith("57")
+        ? recipient.phone
+        : `57${recipient.phone}`;
 
       let shared = false;
       if (navigator.canShare && navigator.canShare({ files: [pdfFile], text: message })) {
@@ -288,7 +301,7 @@ async function sharePdfWithWhatsApp(pdfBlob, fileName, direccion, fecha) {
       }
 
       if (!shared) {
-        const whatsappLink = `https://wa.me/${recipient.phone}?text=${encodeURIComponent(message)}`;
+        const whatsappLink = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
         const newWindow = window.open(whatsappLink, "_blank");
         if (!newWindow) {
           throw new Error("El navegador bloqueó la apertura de WhatsApp");
@@ -330,9 +343,9 @@ async function buildInventoryPdf({
 }) {
   const pageWidth = 612;
   const pageHeight = 792;
-  const scale = 2;
+  const scale = 3;
   const margin = 40;
-  const photoChunkSize = 4;
+  const photoChunkSize = 2;
 
   if (!signatureData || !selfieImage) {
     throw new Error("Faltan imágenes obligatorias para el PDF");
@@ -346,7 +359,8 @@ async function buildInventoryPdf({
   const pages = [];
   const firstPagePhotos = chunks.shift() ?? [];
   const { canvas, ctx } = createPageCanvas(pageWidth, pageHeight, scale);
-  drawHeader(ctx, margin, {
+  await drawHeader(ctx, margin, {
+    pageWidth,
     direccion,
     asesor,
     inquilino,
@@ -354,9 +368,11 @@ async function buildInventoryPdf({
   });
   await drawPhotoGrid(ctx, firstPagePhotos, {
     pageWidth,
+    pageHeight,
     margin,
-    startY: 220,
+    startY: 260,
     startIndex: 0,
+    maxRows: 2,
   });
   pages.push(canvasToPage(canvas));
 
@@ -368,12 +384,14 @@ async function buildInventoryPdf({
       pageHeight,
       scale
     );
-    drawContinuationHeader(photoCtx, margin, index + 2);
+    await drawContinuationHeader(photoCtx, margin, index + 2, pageWidth);
     await drawPhotoGrid(photoCtx, group, {
       pageWidth,
+      pageHeight,
       margin,
-      startY: 120,
+      startY: 160,
       startIndex: processedPhotos,
+      maxRows: 2,
     });
     pages.push(canvasToPage(photoCanvas));
     processedPhotos += group.length;
@@ -408,7 +426,7 @@ function createPageCanvas(pageWidth, pageHeight, scale) {
 }
 
 function canvasToPage(canvas) {
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.86);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
   return {
     dataUrl,
     width: canvas.width,
@@ -416,68 +434,131 @@ function canvasToPage(canvas) {
   };
 }
 
-function drawHeader(ctx, margin, { direccion, asesor, inquilino, fechaFormateada }) {
+async function drawHeader(
+  ctx,
+  margin,
+  { pageWidth, direccion, asesor, inquilino, fechaFormateada }
+) {
+  const headerHeight = 180;
+  const boxWidth = pageWidth - margin * 2;
+  const boxX = margin;
+  const boxY = margin;
+
+  const gradient = ctx.createLinearGradient(boxX, boxY, boxX + boxWidth, boxY + headerHeight);
+  gradient.addColorStop(0, "#f0f7ff");
+  gradient.addColorStop(1, "#ffffff");
+  ctx.fillStyle = gradient;
+  drawRoundedRect(ctx, boxX, boxY, boxWidth, headerHeight, 20);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+  drawRoundedRect(ctx, boxX + 6, boxY + 6, boxWidth - 12, headerHeight - 12, 16);
+  ctx.fill();
+
+  const logo = await getLogoImage();
+  const maxLogoWidth = 150;
+  const maxLogoHeight = 80;
+  const logoRatio = Math.min(maxLogoWidth / logo.width, maxLogoHeight / logo.height);
+  const logoWidth = logo.width * logoRatio;
+  const logoHeight = logo.height * logoRatio;
+  const logoX = boxX + 26;
+  const logoY = boxY + (headerHeight - logoHeight) / 2;
+  ctx.drawImage(logo, logoX, logoY, logoWidth, logoHeight);
+
+  const textX = logoX + logoWidth + 28;
+  ctx.fillStyle = "#0b3d77";
+  ctx.font = "600 20px 'Segoe UI', sans-serif";
+  ctx.fillText("Blue Home Inmobiliaria", textX, boxY + 42);
   ctx.fillStyle = "#111111";
+  ctx.font = "700 32px 'Segoe UI', sans-serif";
+  ctx.fillText("Inventario de entrega", textX, boxY + 82);
+
+  ctx.fillStyle = "#1f7ed0";
+  ctx.fillRect(boxX + 26, boxY + headerHeight - 18, boxWidth - 52, 3);
+
+  const infoX = boxX + 26;
+  const infoY = boxY + 112;
+  const infoWidth = boxWidth - 52;
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "600 16px 'Segoe UI', sans-serif";
+  wrapText(ctx, `Dirección: ${direccion}`, infoX, infoY, infoWidth, 22);
+  wrapText(ctx, `Asesor: ${asesor}`, infoX, infoY + 32, infoWidth, 22);
+  wrapText(ctx, `Inquilino/Recibe: ${inquilino}`, infoX, infoY + 64, infoWidth, 22);
+  ctx.font = "500 16px 'Segoe UI', sans-serif";
+  ctx.fillText(`Fecha: ${fechaFormateada}`, infoX, infoY + 96);
+}
+
+async function drawContinuationHeader(ctx, margin, pageNumber, pageWidth) {
+  const headerHeight = 110;
+  const boxWidth = pageWidth - margin * 2;
+  const boxX = margin;
+  const boxY = margin;
+
+  const gradient = ctx.createLinearGradient(boxX, boxY, boxX + boxWidth, boxY + headerHeight);
+  gradient.addColorStop(0, "#eef4ff");
+  gradient.addColorStop(1, "#ffffff");
+  ctx.fillStyle = gradient;
+  drawRoundedRect(ctx, boxX, boxY, boxWidth, headerHeight, 18);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+  drawRoundedRect(ctx, boxX + 5, boxY + 5, boxWidth - 10, headerHeight - 10, 14);
+  ctx.fill();
+
+  const logo = await getLogoImage();
+  const maxLogoWidth = 95;
+  const maxLogoHeight = 52;
+  const ratio = Math.min(maxLogoWidth / logo.width, maxLogoHeight / logo.height);
+  const logoWidth = logo.width * ratio;
+  const logoHeight = logo.height * ratio;
+  ctx.drawImage(logo, boxX + 24, boxY + (headerHeight - logoHeight) / 2, logoWidth, logoHeight);
+
+  ctx.fillStyle = "#0f172a";
   ctx.font = "700 26px 'Segoe UI', sans-serif";
-  ctx.fillText("Inventario de entrega", margin, margin);
-
-  ctx.font = "16px 'Segoe UI', sans-serif";
-  const infoY = margin + 50;
-  wrapText(ctx, `Dirección: ${direccion}`, margin, infoY, 532, 22);
-  wrapText(ctx, `Asesor: ${asesor}`, margin, infoY + 44, 532, 22);
-  wrapText(ctx, `Inquilino/Recibe: ${inquilino}`, margin, infoY + 88, 532, 22);
-  ctx.fillText(`Fecha: ${fechaFormateada}`, margin, infoY + 132);
-
-  ctx.font = "700 20px 'Segoe UI', sans-serif";
-  ctx.fillText("Inventario fotográfico", margin, infoY + 176);
+  ctx.fillText(`Inventario fotográfico`, boxX + 24 + logoWidth + 24, boxY + 36);
+  ctx.font = "500 18px 'Segoe UI', sans-serif";
+  ctx.fillText(`Página ${pageNumber}`, boxX + 24 + logoWidth + 24, boxY + 68);
 }
 
-function drawContinuationHeader(ctx, margin, pageNumber) {
-  ctx.fillStyle = "#111111";
-  ctx.font = "700 24px 'Segoe UI', sans-serif";
-  ctx.fillText(`Inventario fotográfico (página ${pageNumber})`, margin, margin);
-  ctx.font = "16px 'Segoe UI', sans-serif";
-  ctx.fillText("Continuación de fotografías", margin, margin + 32);
-}
-
-async function drawPhotoGrid(ctx, photosGroup, { pageWidth, margin, startY, startIndex }) {
+async function drawPhotoGrid(
+  ctx,
+  photosGroup,
+  { pageWidth, pageHeight, margin, startY, startIndex, maxRows }
+) {
   if (!photosGroup.length) return;
-  const gap = 20;
-  const columns = 2;
-  const cellWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
-  const cellHeight = 220;
-  const labelHeight = 24;
-  const padding = 10;
+  const gap = 30;
+  const rows = Math.min(maxRows ?? photosGroup.length, photosGroup.length) || 1;
+  const cellWidth = pageWidth - margin * 2;
+  const availableHeight = pageHeight - startY - margin;
+  const cellHeight = (availableHeight - gap * (rows - 1)) / rows;
+  const labelHeight = 28;
+  const padding = 20;
 
   const images = await Promise.all(photosGroup.map(loadImage));
 
   images.forEach((image, idx) => {
-    const column = idx % columns;
-    const row = Math.floor(idx / columns);
-    const x = margin + column * (cellWidth + gap);
-    const y = startY + row * (cellHeight + gap);
+    const x = margin;
+    const y = startY + idx * (cellHeight + gap);
 
-    ctx.fillStyle = "#f5f5f5";
-    ctx.fillRect(x, y, cellWidth, cellHeight);
-    ctx.strokeStyle = "#d0d0d0";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x, y, cellWidth, cellHeight);
+    ctx.fillStyle = "#f5f9ff";
+    drawRoundedRect(ctx, x, y, cellWidth, cellHeight, 18);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(4, 102, 200, 0.18)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
 
     const availableWidth = cellWidth - padding * 2;
     const availableHeight = cellHeight - padding * 2 - labelHeight;
-    const ratio = Math.min(
-      availableWidth / image.width,
-      availableHeight / image.height
-    );
+    const ratio = Math.min(availableWidth / image.width, availableHeight / image.height);
     const drawWidth = image.width * ratio;
     const drawHeight = image.height * ratio;
     const imageX = x + padding + (availableWidth - drawWidth) / 2;
     const imageY = y + padding + (availableHeight - drawHeight) / 2;
     ctx.drawImage(image, imageX, imageY, drawWidth, drawHeight);
 
-    ctx.fillStyle = "#111111";
-    ctx.font = "600 16px 'Segoe UI', sans-serif";
-    ctx.fillText(`Foto ${startIndex + idx + 1}`, x + padding, y + cellHeight - labelHeight);
+    ctx.fillStyle = "#0b3d77";
+    ctx.font = "600 18px 'Segoe UI', sans-serif";
+    ctx.fillText(`Foto ${startIndex + idx + 1}`, x + padding, y + cellHeight - labelHeight + 6);
   });
 }
 
@@ -489,29 +570,46 @@ async function drawSignaturePage(ctx, {
   signatureData,
   selfieImage,
 }) {
-  ctx.fillStyle = "#111111";
-  ctx.font = "700 26px 'Segoe UI', sans-serif";
-  ctx.fillText("Firma y verificación", margin, margin);
+  const contentWidth = pageWidth - margin * 2;
+  const headerY = margin;
 
-  ctx.font = "16px 'Segoe UI', sans-serif";
+  ctx.fillStyle = "#0b3d77";
+  ctx.font = "700 30px 'Segoe UI', sans-serif";
+  ctx.fillText("Firma y verificación", margin, headerY);
+
+  ctx.font = "500 18px 'Segoe UI', sans-serif";
+  ctx.fillStyle = "#1f7ed0";
+  ctx.fillText("Confirmación de entrega Blue Home", margin, headerY + 34);
+
+  const infoBoxY = headerY + 56;
+  ctx.fillStyle = "#eef4ff";
+  drawRoundedRect(ctx, margin, infoBoxY, contentWidth, 72, 16);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+  drawRoundedRect(ctx, margin + 4, infoBoxY + 4, contentWidth - 8, 64, 14);
+  ctx.fill();
+
   const nombreFirmante = firmante || "Sin registrar";
-  wrapText(ctx, `Nombre del firmante: ${nombreFirmante}`, margin, margin + 48, 532, 22);
-  ctx.fillText(`Fecha de entrega: ${fechaFormateada}`, margin, margin + 90);
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "600 18px 'Segoe UI', sans-serif";
+  ctx.fillText(`Nombre del firmante: ${nombreFirmante}`, margin + 18, infoBoxY + 30);
+  ctx.font = "500 18px 'Segoe UI', sans-serif";
+  ctx.fillText(`Fecha de entrega: ${fechaFormateada}`, margin + 18, infoBoxY + 58);
 
   const signatureImg = await loadImage(signatureData);
   const selfieImg = await loadImage(selfieImage);
 
   const signatureBox = {
     x: margin,
-    y: margin + 130,
-    width: pageWidth - margin * 2,
-    height: 200,
+    y: infoBoxY + 96,
+    width: contentWidth,
+    height: 240,
   };
   const selfieBox = {
     x: margin,
-    y: signatureBox.y + signatureBox.height + 60,
-    width: pageWidth - margin * 2,
-    height: 220,
+    y: signatureBox.y + signatureBox.height + 40,
+    width: contentWidth,
+    height: 260,
   };
 
   drawLabeledImage(ctx, signatureImg, signatureBox, "Firma del inquilino");
@@ -519,15 +617,16 @@ async function drawSignaturePage(ctx, {
 }
 
 function drawLabeledImage(ctx, image, box, label) {
-  ctx.fillStyle = "#f5f5f5";
-  ctx.fillRect(box.x, box.y, box.width, box.height);
-  ctx.strokeStyle = "#d0d0d0";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(box.x, box.y, box.width, box.height);
+  ctx.fillStyle = "#f5f9ff";
+  drawRoundedRect(ctx, box.x, box.y, box.width, box.height, 20);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(4, 102, 200, 0.2)";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
 
-  const padding = 16;
+  const padding = 22;
   const availableWidth = box.width - padding * 2;
-  const availableHeight = box.height - padding * 2 - 28;
+  const availableHeight = box.height - padding * 2 - 32;
   const ratio = Math.min(availableWidth / image.width, availableHeight / image.height);
   const drawWidth = image.width * ratio;
   const drawHeight = image.height * ratio;
@@ -535,9 +634,24 @@ function drawLabeledImage(ctx, image, box, label) {
   const imageY = box.y + padding + (availableHeight - drawHeight) / 2;
   ctx.drawImage(image, imageX, imageY, drawWidth, drawHeight);
 
-  ctx.fillStyle = "#111111";
-  ctx.font = "600 18px 'Segoe UI', sans-serif";
+  ctx.fillStyle = "#0b3d77";
+  ctx.font = "600 20px 'Segoe UI', sans-serif";
   ctx.fillText(label, box.x + padding, box.y + box.height - 26);
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }
 
 function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
