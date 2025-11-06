@@ -91,7 +91,8 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+textarea {
   padding: 0.9rem 1rem;
   border-radius: 14px;
   border: 1px solid rgba(3, 58, 116, 0.18);
@@ -99,9 +100,16 @@ input {
   background: rgba(255, 255, 255, 0.92);
 }
 
-input:focus {
+input:focus,
+textarea:focus {
   outline: 3px solid rgba(0, 118, 214, 0.28);
   border-color: var(--accent);
+}
+
+textarea {
+  min-height: 140px;
+  resize: vertical;
+  line-height: 1.4;
 }
 
 .camera-group {

@@ -158,7 +158,7 @@ const draw = (event) => {
   const { x, y } = getCanvasCoordinates(event);
   signatureCtx.lineTo(x, y);
   signatureCtx.strokeStyle = "#111";
-  signatureCtx.lineWidth = 2;
+  signatureCtx.lineWidth = getSignatureLineWidth();
   signatureCtx.lineCap = "round";
   signatureCtx.lineJoin = "round";
   signatureCtx.stroke();
@@ -174,18 +174,26 @@ function getCanvasCoordinates(event) {
   const clientX = event.touches ? event.touches[0].clientX : event.clientX;
   const clientY = event.touches ? event.touches[0].clientY : event.clientY;
   return {
-    x: clientX - rect.left,
-    y: clientY - rect.top,
+    x: (clientX - rect.left) * (signatureCanvas.width / rect.width),
+    y: (clientY - rect.top) * (signatureCanvas.height / rect.height),
   };
+}
+
+function getSignatureLineWidth() {
+  const rect = signatureCanvas.getBoundingClientRect();
+  const scale = signatureCanvas.width / rect.width;
+  return Math.max(1.8, 2 * scale);
 }
 
 signatureCanvas.addEventListener("pointerdown", startDrawing);
 signatureCanvas.addEventListener("pointermove", draw);
 signatureCanvas.addEventListener("pointerup", stopDrawing);
 signatureCanvas.addEventListener("pointerleave", stopDrawing);
+signatureCanvas.addEventListener("pointercancel", stopDrawing);
 signatureCanvas.addEventListener("touchstart", startDrawing, { passive: false });
 signatureCanvas.addEventListener("touchmove", draw, { passive: false });
 signatureCanvas.addEventListener("touchend", stopDrawing);
+signatureCanvas.addEventListener("touchcancel", stopDrawing);
 
 clearSignatureBtn.addEventListener("click", () => {
   signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
@@ -243,6 +251,12 @@ async function generatePdf() {
     const codigo = formData.get("codigo").trim();
     const asesor = formData.get("asesor").trim();
     const inquilino = formData.get("inquilino").trim();
+    const observacionesExtras = (formData.get("observacionesExtras") || "")
+      .toString()
+      .trim();
+    const observacionesDanos = (formData.get("observacionesDanos") || "")
+      .toString()
+      .trim();
     const fechaActual = new Date();
     const fechaFormateada = fechaActual.toLocaleDateString("es-CO", {
       day: "2-digit",
@@ -265,6 +279,8 @@ async function generatePdf() {
       signatureData,
       selfieImage,
       firmante: firmaNombre.value.trim(),
+      observacionesExtras,
+      observacionesDanos,
     });
 
     downloadBlob(pdfBlob, fileName);
@@ -349,6 +365,8 @@ async function buildInventoryPdf({
   signatureData,
   selfieImage,
   firmante,
+  observacionesExtras,
+  observacionesDanos,
 }) {
   const pageWidth = 612;
   const pageHeight = 792;
@@ -366,20 +384,37 @@ async function buildInventoryPdf({
   }
 
   const pages = [];
-  const firstPagePhotos = chunks.shift() ?? [];
+  let firstPagePhotos = chunks.shift() ?? [];
   const { canvas, ctx } = createPageCanvas(pageWidth, pageHeight, scale);
-  await drawHeader(ctx, margin, {
+  const headerBottom = await drawHeader(ctx, margin, {
     pageWidth,
     codigo,
     asesor,
     inquilino,
     fechaFormateada,
   });
+  const observationsBottom = drawObservationsSection(ctx, {
+    margin,
+    pageWidth,
+    startY: headerBottom + 24,
+    observacionesExtras,
+    observacionesDanos,
+  });
+
+  const photoStartY = observationsBottom + 24;
+  const availableForPhotos = pageHeight - photoStartY - margin;
+  const minAvailableHeightForPhotos = 360;
+  const hasSpaceForPhotos = availableForPhotos >= minAvailableHeightForPhotos;
+  if (!hasSpaceForPhotos && firstPagePhotos.length) {
+    chunks.unshift(firstPagePhotos);
+    firstPagePhotos = [];
+  }
+
   await drawPhotoGrid(ctx, firstPagePhotos, {
     pageWidth,
     pageHeight,
     margin,
-    startY: 260,
+    startY: photoStartY,
     startIndex: 0,
     maxRows: 2,
   });
@@ -512,6 +547,8 @@ async function drawHeader(
   wrapText(ctx, `Inquilino/Recibe: ${inquilino}`, infoX, infoY + 32, infoWidth, 22);
   ctx.font = "500 16px 'Segoe UI', sans-serif";
   ctx.fillText(`Fecha: ${fechaFormateada}`, infoX, infoY + 72);
+
+  return boxY + headerHeight;
 }
 
 async function drawContinuationHeader(ctx, margin, pageNumber, pageWidth, codigo) {
@@ -553,6 +590,75 @@ async function drawContinuationHeader(ctx, margin, pageNumber, pageWidth, codigo
     ctx.fillText(codeText, textX, boxY + 68);
     ctx.fillStyle = "#0f172a";
   }
+}
+
+function drawObservationsSection(ctx, { margin, pageWidth, startY, observacionesExtras, observacionesDanos }) {
+  const boxWidth = pageWidth - margin * 2;
+  let currentY = startY;
+
+  currentY = drawObservationBox(ctx, {
+    x: margin,
+    y: currentY,
+    width: boxWidth,
+    title: "Observaciones de extras del inmueble",
+    content: observacionesExtras,
+  });
+
+  currentY += 20;
+
+  currentY = drawObservationBox(ctx, {
+    x: margin,
+    y: currentY,
+    width: boxWidth,
+    title: "Observaciones de daños del inmueble",
+    content: observacionesDanos,
+  });
+
+  return currentY;
+}
+
+function drawObservationBox(ctx, { x, y, width, title, content }) {
+  const padding = 24;
+  const innerPadding = 20;
+  const titleFont = "600 18px 'Segoe UI', sans-serif";
+  const textFont = "400 16px 'Segoe UI', sans-serif";
+  const lineHeight = 22;
+  const sanitizedContent = content && content.trim().length
+    ? content.trim()
+    : "Sin observaciones registradas.";
+
+  ctx.font = textFont;
+  const textHeight = measureTextBlockHeight(ctx, sanitizedContent, width - (padding + innerPadding) * 2, lineHeight);
+  const boxHeight = padding * 2 + textHeight + 30;
+
+  const gradient = ctx.createLinearGradient(x, y, x + width, y + boxHeight);
+  gradient.addColorStop(0, "#f3f8ff");
+  gradient.addColorStop(1, "#ffffff");
+  ctx.fillStyle = gradient;
+  drawRoundedRect(ctx, x, y, width, boxHeight, 18);
+  ctx.fill();
+
+  const previousStrokeStyle = ctx.strokeStyle;
+  const previousLineWidth = ctx.lineWidth;
+  ctx.strokeStyle = "rgba(4, 102, 200, 0.15)";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  ctx.strokeStyle = previousStrokeStyle;
+  ctx.lineWidth = previousLineWidth;
+
+  const titleX = x + padding;
+  const titleY = y + padding - 4;
+  ctx.fillStyle = "#0b3d77";
+  ctx.font = titleFont;
+  ctx.fillText(title, titleX, titleY + 8);
+
+  const textX = x + padding + innerPadding;
+  const textY = titleY + 34;
+  ctx.font = textFont;
+  ctx.fillStyle = "#0f172a";
+  wrapText(ctx, sanitizedContent, textX, textY, width - (padding + innerPadding) * 2, lineHeight);
+
+  return y + boxHeight;
 }
 
 async function drawPhotoGrid(
@@ -700,26 +806,67 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = text.split(" ");
-  let line = "";
-  let currentY = y;
+function measureTextBlockHeight(ctx, text, maxWidth, lineHeight) {
+  const paragraphs = text.split(/\n/);
+  let lines = 0;
 
-  words.forEach((word) => {
-    const testLine = line ? `${line} ${word}` : word;
-    const { width } = ctx.measureText(testLine);
-    if (width > maxWidth && line) {
-      ctx.fillText(line, x, currentY);
-      line = word;
-      currentY += lineHeight;
-    } else {
-      line = testLine;
+  paragraphs.forEach((paragraph) => {
+    const words = paragraph.trim().length ? paragraph.trim().split(/\s+/) : [];
+    if (!words.length) {
+      lines += 1;
+      return;
+    }
+
+    let line = "";
+    words.forEach((word) => {
+      const testLine = line ? `${line} ${word}` : word;
+      if (ctx.measureText(testLine).width > maxWidth && line) {
+        lines += 1;
+        line = word;
+      } else {
+        line = testLine;
+      }
+    });
+
+    if (line) {
+      lines += 1;
     }
   });
 
-  if (line) {
-    ctx.fillText(line, x, currentY);
-  }
+  return Math.max(lineHeight, lines * lineHeight || lineHeight);
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const paragraphs = text.split(/\n/);
+  let currentY = y;
+
+  paragraphs.forEach((paragraph) => {
+    const words = paragraph.trim().length ? paragraph.trim().split(/\s+/) : [];
+    if (!words.length) {
+      ctx.fillText("", x, currentY);
+      currentY += lineHeight;
+      return;
+    }
+
+    let line = "";
+    words.forEach((word) => {
+      const testLine = line ? `${line} ${word}` : word;
+      if (ctx.measureText(testLine).width > maxWidth && line) {
+        ctx.fillText(line, x, currentY);
+        line = word;
+        currentY += lineHeight;
+      } else {
+        line = testLine;
+      }
+    });
+
+    if (line) {
+      ctx.fillText(line, x, currentY);
+      currentY += lineHeight;
+    }
+  });
+
+  return currentY;
 }
 
 function loadImage(source) {
